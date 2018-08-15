@@ -38,6 +38,12 @@ public class Versions {
   public static final String KAFKA_V2_JSON_JSON_WEIGHTED = KAFKA_V2_JSON_JSON;
   public static final String KAFKA_V2_JSON_JSON_WEIGHTED_LOW = KAFKA_V2_JSON_JSON + "; qs=0.1";
 
+  public static final String KAFKA_V2_JSONSCHEMA = "application/vnd.kafka.v2+jsonschema";
+  public static final String KAFKA_V2_JSONSCHEMA_JSON = "application/vnd.kafka.json.v2+jsonschema";
+  public static final String KAFKA_V2_JSONSCHEMA_JSON_WEIGHTED = KAFKA_V2_JSONSCHEMA_JSON;
+  public static final String KAFKA_V2_JSONSCHEMA_JSON_WEIGHTED_LOW = KAFKA_V2_JSONSCHEMA_JSON
+      + "; qs=0.1";
+
   // Constants for version 1
   public static final String KAFKA_V1_JSON = "application/vnd.kafka.v1+json";
   // This is set < 1 because it is only the most-specific type if there isn't an embedded data type.

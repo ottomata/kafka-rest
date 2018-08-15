@@ -54,7 +54,7 @@ import io.confluent.rest.annotations.PerformanceMetric;
 @Produces({Versions.KAFKA_V1_JSON_WEIGHTED, Versions.KAFKA_DEFAULT_JSON_WEIGHTED,
            Versions.JSON_WEIGHTED, Versions.KAFKA_V2_JSON_WEIGHTED})
 @Consumes({Versions.KAFKA_V1_JSON, Versions.KAFKA_DEFAULT_JSON, Versions.JSON,
-           Versions.GENERIC_REQUEST, Versions.KAFKA_V2_JSON})
+           Versions.GENERIC_REQUEST, Versions.KAFKA_V2_JSON, Versions.KAFKA_V2_JSONSCHEMA})
 public class TopicsResource {
 
   private static final Logger log = LoggerFactory.getLogger(TopicsResource.class);
@@ -106,6 +106,18 @@ public class TopicsResource {
       @Valid @NotNull TopicProduceRequest<JsonTopicProduceRecord> request
   ) {
     produce(asyncResponse, topicName, EmbeddedFormat.JSON, request);
+  }
+
+  @POST
+  @Path("/{topic}")
+  @PerformanceMetric("topic.produce-jsonschema")
+  @Consumes({Versions.KAFKA_V2_JSONSCHEMA_JSON})
+  public void produceJsonSchema(
+          final @Suspended AsyncResponse asyncResponse,
+          @PathParam("topic") String topicName,
+          @Valid @NotNull TopicProduceRequest<JsonTopicProduceRecord> request
+  ) {
+    produce(asyncResponse, topicName, EmbeddedFormat.JSONSCHEMA, request);
   }
 
   @POST

@@ -29,6 +29,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 import io.confluent.kafka.serializers.KafkaAvroSerializer;
 import io.confluent.kafka.serializers.KafkaJsonSerializer;
 import io.confluent.kafkarest.entities.EmbeddedFormat;
@@ -74,6 +76,10 @@ public class ProducerPool {
     Map<String, Object> avroProps =
         buildAvroConfig(appConfig, bootstrapBrokers, producerConfigOverrides);
     producers.put(EmbeddedFormat.AVRO, buildAvroProducer(avroProps));
+
+    Map<String, Object> jsonSchemaProps =
+            buildJsonSchemaConfig(appConfig, bootstrapBrokers, producerConfigOverrides);
+    producers.put(EmbeddedFormat.JSONSCHEMA, buildJsonSchemaProducer(jsonSchemaProps));
   }
 
   private Map<String, Object> buildStandardConfig(
@@ -109,6 +115,32 @@ public class ProducerPool {
     KafkaProducer<K, V> producer =
         new KafkaProducer<K, V>(props, keySerializer, valueSerializer);
     return new NoSchemaRestProducer<K, V>(producer);
+  }
+
+  private Map<String, Object> buildJsonSchemaConfig(
+          KafkaRestConfig appConfig,
+          String bootstrapBrokers,
+          Properties producerConfigOverrides
+  ) {
+    Map<String, Object> defaults = new HashMap<String, Object>();
+    defaults.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapBrokers);
+    defaults.put(
+            "jsonschema.registry.url",
+            appConfig.getString(KafkaRestConfig.JSONSCHEMA_REGISTRY_URL_CONFIG)
+    );
+
+    Properties producerProps = (Properties) appConfig.getProducerProperties();
+    return buildConfig(defaults, producerProps, producerConfigOverrides);
+  }
+
+  private JsonSchemaRestProducer buildJsonSchemaProducer(Map<String, Object> props) {
+    final KafkaJsonSerializer keySerializer = new KafkaJsonSerializer();
+    keySerializer.configure(props, true);
+    final KafkaJsonSerializer valueSerializer = new KafkaJsonSerializer();
+    valueSerializer.configure(props, false);
+    KafkaProducer<JsonNode, JsonNode> producer
+            = new KafkaProducer<JsonNode, JsonNode>(props, keySerializer, valueSerializer);
+    return new JsonSchemaRestProducer(producer, keySerializer, valueSerializer);
   }
 
   private Map<String, Object> buildAvroConfig(

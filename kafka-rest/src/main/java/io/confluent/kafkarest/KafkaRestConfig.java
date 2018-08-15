@@ -106,6 +106,12 @@ public class KafkaRestConfig extends RestConfig {
       "The base URL for the schema registry that should be used by the Avro serializer.";
   private static final String SCHEMA_REGISTRY_URL_DEFAULT = "http://localhost:8081";
 
+  public static final String JSONSCHEMA_REGISTRY_URL_CONFIG = "jsonschema.registry.url";
+  private static final String JSONSCHEMA_REGISTRY_URL_DOC =
+      "The base URL for the schema registry that should be used by the JsonSchema serializer "
+      + "for validation.";
+  private static final String JSONSCHEMA_REGISTRY_URL_DEFAULT = "http://localhost:8085/v2/schemas";
+
   public static final String PRODUCER_THREADS_CONFIG = "producer.threads";
   private static final String PRODUCER_THREADS_DOC =
       "Number of threads to run produce requests on.";
@@ -368,6 +374,13 @@ public class KafkaRestConfig extends RestConfig {
             SCHEMA_REGISTRY_URL_DEFAULT,
             Importance.HIGH,
             SCHEMA_REGISTRY_URL_DOC
+        )
+        .define(
+            JSONSCHEMA_REGISTRY_URL_CONFIG,
+            Type.STRING,
+            JSONSCHEMA_REGISTRY_URL_DEFAULT,
+            Importance.MEDIUM,
+            JSONSCHEMA_REGISTRY_URL_DOC
         )
         .define(
             PRODUCER_THREADS_CONFIG,
