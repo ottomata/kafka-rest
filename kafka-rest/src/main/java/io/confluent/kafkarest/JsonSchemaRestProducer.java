@@ -20,10 +20,12 @@ import com.fasterxml.jackson.core.JsonPointer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.dataformat.yaml.YAMLParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.fge.jsonschema.core.exceptions.ProcessingException;
 import com.github.fge.jsonschema.core.report.ProcessingReport;
 import com.github.fge.jsonschema.main.JsonSchema;
 import com.github.fge.jsonschema.main.JsonSchemaFactory;
 import io.confluent.kafkarest.entities.JsonTopicProduceRecord;
+import io.confluent.rest.exceptions.RestConstraintViolationException;
 import io.confluent.rest.exceptions.RestException;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -33,6 +35,9 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 //import java.util.Map;
 //import java.util.concurrent.ConcurrentHashMap;
@@ -55,7 +60,8 @@ public class JsonSchemaRestProducer implements RestProducer<JsonNode, JsonNode> 
   protected final KafkaProducer<JsonNode, JsonNode> producer;
   protected final KafkaJsonSerializer keySerializer;
   protected final KafkaJsonSerializer valueSerializer;
-  //  protected final Map<Schema, Integer> schemaIdCache;
+  // Maps JSONSchema URIs to their parsed JsonSchema to use for JsonNode data validation.
+  protected final Map<String, JsonSchema> jsonSchemaCache;
 
   private static final Logger log = LoggerFactory.getLogger(JsonSchemaRestProducer.class);
 
@@ -68,7 +74,7 @@ public class JsonSchemaRestProducer implements RestProducer<JsonNode, JsonNode> 
     this.producer = producer;
     this.keySerializer = keySerializer;
     this.valueSerializer = valueSerializer;
-    //    this.schemaIdCache = new ConcurrentHashMap<>(100);
+    this.jsonSchemaCache = new ConcurrentHashMap<>(100);
   }
 
   public void produce(
@@ -83,22 +89,28 @@ public class JsonSchemaRestProducer implements RestProducer<JsonNode, JsonNode> 
       // get jsonschema uri out of record schema_field
       // get jsonschema from cache or lookup from repo
       // validate record against jsonschema, throw/collect error if not valid
-      //
 
-      // record.getValue() should return a JsonNode.  This prints out just fine.
-      log.info("record value is " + record.getValue());
-
-      try {
-        // But when I try to use it as a JsonNode (by passing it to this method),
-        // I get:
-        // java.util.LinkedHashMap cannot be cast to com.fasterxml.jackson.databind.JsonNode
-        //
-        if (!validateJsonValue(record.getValue())) {
-          throw new RestException("Schema validation failed", 408, 40801);
+      if (!record.getKey().isNull()) {
+        try {
+          validateJson(topic, record.getKey());
+        } catch (ProcessingException e) {
+          // TODO new Errors code
+          throw new RestException("Key JSONSchema validation", 422, 40801, e);
+        } catch (Exception e) {
+          throw new RestException("Got exception while validating key against JSONSchema", 422, 40801, e);
         }
-      } catch (Exception e) {
-        log.error("VALIDATION FAILED: ", e);
-        throw new RestException("Schema validation or lookup failed", 408, 40801, e);
+      }
+
+      // TODO should we enforce non-null value?  probably.
+      if (!record.getValue().isNull()) {
+        try {
+          validateJson(topic, record.getValue());
+        } catch (ProcessingException e) {
+          // TODO new Errors code
+          throw new RestException("Value JSONSchema validation", 422, 40801, e);
+        } catch (Exception e) {
+          throw new RestException("Got exception while validating value against JSONSchema", 422, 40801, e);
+        }
       }
 
       Integer recordPartition = partition;
@@ -153,7 +165,11 @@ public class JsonSchemaRestProducer implements RestProducer<JsonNode, JsonNode> 
    * @return schema
    * @throws Exception e
    */
-  public JsonSchema getJsonSchema(URI schemaUri) throws Exception {
+  public JsonSchema getJsonSchema(String topic, URI schemaUri) throws Exception {
+    JsonSchema schema = jsonSchemaCache.get(schemaUri.toString());
+    if (schema != null)
+      return schema;
+
     YAMLParser yamlParser = null;
     try {
       log.info("Looking up schema at " + schemaUri);
@@ -164,21 +180,66 @@ public class JsonSchemaRestProducer implements RestProducer<JsonNode, JsonNode> 
 
     try {
       // TODO get fancy and use URITranslator to resolve relative $refs somehow?
+
       // Use SchemaLoader so we resolve any JsonRefs in the JSONSchema.
       JsonNode jsonSchemaNode = schemaLoader.load(objectMapper.readTree(yamlParser)).getBaseNode();
-      log.info("got json schema:\n" + jsonSchemaNode);
-      return jsonSchemaFactory.getJsonSchema(jsonSchemaNode);
+      log.debug("Retrieved JSONSchema JSON from " + schemaUri + ":\n" + jsonSchemaNode);
+      schema = jsonSchemaFactory.getJsonSchema(jsonSchemaNode);
 
+      // cache this schema for later if it is a versioned schema
+      // TODO we should probalby always cache, not sure what to do with unversioned schema uri.
+      // perhaps this should not happen.
+      if (getSchemaVersion(topic, schemaUri.toString()) != null)
+        jsonSchemaCache.put(schemaUri.toString(), schema);
+
+      return schema;
+
+      // TODO fix Exception types
     } catch (IOException e) {
       throw new Exception("Failed reading json schema returned from " + schemaUri, e);
     }
   }
 
-  public boolean validateJsonValue(JsonNode value) throws Exception {
-    JsonSchema schema = getJsonSchema(getSchemaUri(null, value));
-    ProcessingReport report = schema.validate(value);
-    log.info("schema validation report:\n" + report);
-    return report.isSuccess();
+  /**
+   * Extracts the schema version from the schemaURIString using the schemaURIVersionRegex.
+   *
+   * @param topic Unused here, but a subclass could override this to use the topic when
+   *              infering the schema version.
+   *
+   * @param schemaURIString
+   * @return
+   */
+  public Integer getSchemaVersion(String topic, String schemaURIString) throws Exception {
+    Matcher versionMatcher = schemaUriVersionPattern.matcher(schemaURIString);
+
+    Integer version = null;
+
+    // If we matched a schema version,
+    // then extract it from the match and parse it as an Integer.
+    if (versionMatcher.find()) {
+      String versionString = versionMatcher.group("version");
+      try {
+        version = Integer.parseInt(versionString);
+        log.trace("Extracted schema version " + version + " from schema URI " + schemaURIString);
+      }
+      catch (NumberFormatException e) {
+        throw new Exception("Failed parsing schema version " + versionString + " as an Integer.", e);
+      }
+    }
+
+    return version;
+  }
+
+  /**
+   * Looks up the JSONSchema for the JSON data or topic and validates it.
+   * @param data JsonNode data
+   * @throws com.github.fge.jsonschema.core.exceptions.ProcessingException if validation fails
+   */
+  public void validateJson(String topic, JsonNode data) throws Exception {
+    URI schemaUri = getSchemaUri(topic, data);
+    JsonSchema schema = getJsonSchema(topic, schemaUri);
+    ProcessingReport report = schema.validate(data);
+    log.debug("JSON data validated against JSONSchema at " + schemaUri, report);
   }
 
 }

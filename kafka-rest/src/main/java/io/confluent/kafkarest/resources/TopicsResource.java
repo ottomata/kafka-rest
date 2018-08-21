@@ -54,7 +54,7 @@ import io.confluent.rest.annotations.PerformanceMetric;
 @Produces({Versions.KAFKA_V1_JSON_WEIGHTED, Versions.KAFKA_DEFAULT_JSON_WEIGHTED,
            Versions.JSON_WEIGHTED, Versions.KAFKA_V2_JSON_WEIGHTED})
 @Consumes({Versions.KAFKA_V1_JSON, Versions.KAFKA_DEFAULT_JSON, Versions.JSON,
-           Versions.GENERIC_REQUEST, Versions.KAFKA_V2_JSON, Versions.KAFKA_V2_JSONSCHEMA})
+           Versions.GENERIC_REQUEST, Versions.KAFKA_V2_JSON})
 public class TopicsResource {
 
   private static final Logger log = LoggerFactory.getLogger(TopicsResource.class);
@@ -111,11 +111,14 @@ public class TopicsResource {
   @POST
   @Path("/{topic}")
   @PerformanceMetric("topic.produce-jsonschema")
-  @Consumes({Versions.KAFKA_V2_JSONSCHEMA_JSON})
+  @Consumes({Versions.KAFKA_V2_JSON_JSONSCHEMA})
   public void produceJsonSchema(
           final @Suspended AsyncResponse asyncResponse,
           @PathParam("topic") String topicName,
-          @Valid @NotNull TopicProduceRequest<JsonTopicProduceRecord> request
+          // TODO: We use AvroTopicProduceRecord because it expects JsonNodes for
+          // its key and value types, but we don't use any Avro conversion at all.
+          // Should we create a new JsonSchemaProduceRecord class that uses JsonNode too?
+          @Valid @NotNull TopicProduceRequest<AvroTopicProduceRecord> request
   ) {
     produce(asyncResponse, topicName, EmbeddedFormat.JSONSCHEMA, request);
   }
